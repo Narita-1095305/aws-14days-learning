@@ -1,0 +1,93 @@
+# Terraform specific files
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+*.tfplan.*
+
+# Terraform cache
+.terraform/
+.terraform.lock.hcl
+
+# Terraform variable files (uncomment if they contain sensitive data)
+# *.tfvars
+# *.tfvars.json
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform CLI configuration files
+.terraformrc
+terraform.rc
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# AWS credentials
+.aws/
+aws-credentials
+credentials
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.backup
+*.bak
+
+# Archive files (unless specifically needed)
+*.zip
+*.tar.gz
+*.rar
+
+# Node modules (if any Node.js tools are used)
+node_modules/
+
+# Python cache (if any Python tools are used)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Local test files
+test/
+tests/
+*test*
+
+*.tfvars
