@@ -20,6 +20,42 @@ provider "aws" {
 }
 
 ###############################################################################
+# CloudFront 用 ドメイン/証明書 設定
+###############################################################################
+
+# Route53 スタックの `terraform.tfvars` と同じ apex ドメインを指定（例: example.com）
+variable "domain_name" {
+  description = "アプリの apex ドメイン（例: example.com）。CloudFront の CNAME/ACM 用"
+  type        = string
+}
+
+# CloudFront に割り当てるサブドメイン（空文字なら apex 自体を割り当て）
+variable "cf_subdomain" {
+  description = "CloudFront 用のサブドメイン（例: www, cdn）。空なら apex"
+  type        = string
+  default     = ""
+}
+
+locals {
+  cf_domain_name = var.cf_subdomain != "" ? "${var.cf_subdomain}.${var.domain_name}" : var.domain_name
+}
+
+# CloudFront 用 ACM は us-east-1 で発行する必要がある
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+# ルート53に移設した ACM を参照（us-east-1）
+data "aws_acm_certificate" "cf" {
+  provider     = aws.us_east_1
+  domain       = local.cf_domain_name
+  statuses     = ["ISSUED"]
+  most_recent  = true
+  types        = ["AMAZON_ISSUED"]
+}
+
+###############################################################################
 # VPC
 ###############################################################################
 resource "aws_vpc" "udemy_aws_14days" {
@@ -182,10 +218,10 @@ resource "aws_security_group" "web_sg" {
   }
 
   ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    description     = "HTTP"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
     security_groups = [aws_security_group.alb_sg.id]
   }
 
@@ -452,7 +488,7 @@ resource "aws_db_subnet_group" "udemy_aws_14days_db" {
 resource "aws_db_parameter_group" "udemy_aws_14days_mysql84" {
   name        = "udemy-aws-14days-mysql84-parameter-group"
   description = "udemy-aws-14days-mysql84-parameter-group"
-  family      = "mysql8.4"                # ← エンジンファミリー
+  family      = "mysql8.4" # ← エンジンファミリー
 
   tags = {
     Name = "udemy-aws-14days-mysql84-parameter-group"
@@ -485,41 +521,41 @@ resource "aws_db_parameter_group" "udemy_aws_14days_mysql84" {
 ###############################################################################
 resource "aws_db_instance" "udemy_aws_14days_mysql" {
   ### 基本 ###
-  identifier        = "udemy-aws-14days-mysql"
-  engine            = "mysql"
-  engine_version    = "8.4.5"            # MySQL 8.4 系
+  identifier     = "udemy-aws-14days-mysql"
+  engine         = "mysql"
+  engine_version = "8.4.5" # MySQL 8.4 系
   instance_class = "db.t4g.micro"
 
   ### ストレージ ###
-  allocated_storage = 20                # GB
+  allocated_storage = 20 # GB
   storage_type      = "gp3"
 
   ### 認証 ###
   username = "root"
-  password = "Root!1234"                # 実運用では tfvars や Secrets Manager に分離推奨
+  password = "Root!1234" # 実運用では tfvars や Secrets Manager に分離推奨
 
   ### ネットワーク ###
-  db_subnet_group_name   = aws_db_subnet_group.udemy_aws_14days_db.name   # private 1a/1c
-  vpc_security_group_ids = [aws_security_group.db_sg.id]                  # inbound 制御
+  db_subnet_group_name   = aws_db_subnet_group.udemy_aws_14days_db.name # private 1a/1c
+  vpc_security_group_ids = [aws_security_group.db_sg.id]                # inbound 制御
 
   # multi_az               = true        # 2 インスタンスでマルチ AZ
 
-  publicly_accessible    = false       # IPv4 内部のみ
+  publicly_accessible = false # IPv4 内部のみ
   # (デフォルトで IPv6 無効)
 
   ### パラメータグループ ###
   parameter_group_name = aws_db_parameter_group.udemy_aws_14days_mysql84.name
 
   ### バックアップ ###
-  backup_retention_period = 2                # 日
-  backup_window = "19:00-19:30"    # UTC
+  backup_retention_period = 2             # 日
+  backup_window           = "19:00-19:30" # UTC
 
   ### メンテナンス ###
   maintenance_window = "sat:20:00-sat:20:30"
 
   ### その他オプション ###
-  apply_immediately   = true            # 変更をすぐ反映（任意）
-  skip_final_snapshot = true            # 破棄時スナップショット不要（検証環境向け）
+  apply_immediately   = true # 変更をすぐ反映（任意）
+  skip_final_snapshot = true # 破棄時スナップショット不要（検証環境向け）
 
   tags = {
     Name = "udemy-aws-14days-mysql"
@@ -562,14 +598,14 @@ resource "aws_security_group" "alb_sg" {
 resource "aws_lb" "udemy_aws_14days_alb" {
   name               = "udemy-aws-14days-alb"
   load_balancer_type = "application"
-  internal           = false                 # インターネット向け
+  internal           = false # インターネット向け
   ip_address_type    = "ipv4"
 
   security_groups = [aws_security_group.alb_sg.id]
 
   subnets = [
-    aws_subnet.udemy_aws_14days_public_1a.id,   # AZ: ap-northeast-1a
-    aws_subnet.udemy_aws_14days_public_1c.id,   # AZ: ap-northeast-1c
+    aws_subnet.udemy_aws_14days_public_1a.id, # AZ: ap-northeast-1a
+    aws_subnet.udemy_aws_14days_public_1c.id, # AZ: ap-northeast-1c
   ]
 
   tags = {
@@ -602,9 +638,10 @@ resource "null_resource" "init_rds" {
     aws_instance.web_1a
   ]
 
-  # エンドポイントが変わったら再実行
+  # エンドポイントやシード版が変わったら再実行
   triggers = {
     rds_endpoint = aws_db_instance.udemy_aws_14days_mysql.endpoint
+    seed_version = "cf-image-urls-v1"
   }
 
   provisioner "remote-exec" {
@@ -626,10 +663,10 @@ resource "null_resource" "init_rds" {
       "  detail VARCHAR(1000),",
       "  image  VARCHAR(1000)",
       ");",
-      "INSERT INTO posts VALUES (1, 'JAWS Days 初参加（2014）', '学びが多かった。何より熱量に驚いた。自分も発信する側になりたい。', 'https://${aws_s3_bucket.images.bucket}.s3.ap-northeast-1.amazonaws.com/imgs/img1_s3.png');",
-      "INSERT INTO posts VALUES (2, 're:Invent 初参加（2016）', '規模の大きさに驚いた。個人的には Step Functions の発表が1番よかった。', 'https://${aws_s3_bucket.images.bucket}.s3.ap-northeast-1.amazonaws.com/imgs/img2_s3.png');",
-      "INSERT INTO posts VALUES (3, 'AWS 設計 に関する本を執筆しました（2018）', '多くの方に読んでいただけたら嬉しいです。', 'https://${aws_s3_bucket.images.bucket}.s3.ap-northeast-1.amazonaws.com/imgs/img3_s3.png');",
-      "INSERT INTO posts VALUES (4, 'AWS SAA 資格対策の本を執筆しました（2019）', 'オリジナル問題を通して対策していただけます。', 'https://${aws_s3_bucket.images.bucket}.s3.ap-northeast-1.amazonaws.com/imgs/img4_s3.png');",
+      "INSERT INTO posts (id, title, detail, image) VALUES (1, 'JAWS Days 初参加（2014）', '学びが多かった。何より熱量に驚いた。自分も発信する側になりたい。', 'https://${aws_cloudfront_distribution.single_site.domain_name}/imgs/img1_s3.png') ON DUPLICATE KEY UPDATE title=VALUES(title), detail=VALUES(detail), image=VALUES(image);",
+      "INSERT INTO posts (id, title, detail, image) VALUES (2, 're:Invent 初参加（2016）', '規模の大きさに驚いた。個人的には Step Functions の発表が1番よかった。', 'https://${aws_cloudfront_distribution.single_site.domain_name}/imgs/img2_s3.png') ON DUPLICATE KEY UPDATE title=VALUES(title), detail=VALUES(detail), image=VALUES(image);",
+      "INSERT INTO posts (id, title, detail, image) VALUES (3, 'AWS 設計 に関する本を執筆しました（2018）', '多くの方に読んでいただけたら嬉しいです。', 'https://${aws_cloudfront_distribution.single_site.domain_name}/imgs/img3_s3.png') ON DUPLICATE KEY UPDATE title=VALUES(title), detail=VALUES(detail), image=VALUES(image);",
+      "INSERT INTO posts (id, title, detail, image) VALUES (4, 'AWS SAA 資格対策の本を執筆しました（2019）', 'オリジナル問題を通して対策していただけます。', 'https://${aws_cloudfront_distribution.single_site.domain_name}/imgs/img4_s3.png') ON DUPLICATE KEY UPDATE title=VALUES(title), detail=VALUES(detail), image=VALUES(image);",
       "EOSQL"
       # ↑↑↑ ここまで ↑↑↑
     ]
@@ -638,8 +675,8 @@ resource "null_resource" "init_rds" {
     connection {
       type        = "ssh"
       user        = "ec2-user"
-      host        = aws_instance.web_1a.public_ip        # ※ Elastic IP を付与しているならそちらでも可
-      private_key = file("./udemy-aws-14days.pem")        # キーペアの秘密鍵パスを合わせてね
+      host        = aws_instance.web_1a.public_ip  # ※ Elastic IP を付与しているならそちらでも可
+      private_key = file("./udemy-aws-14days.pem") # キーペアの秘密鍵パスを合わせてね
     }
   }
 }
@@ -648,7 +685,7 @@ resource "null_resource" "init_rds" {
 # ──────────────────────── ALB ターゲットグループ ────────────────────────
 ###############################################################################
 resource "aws_lb_target_group" "udemy_aws_14days_tg" {
-  name             = "udemy-aws-14days-tg"   # 長さ 32 文字以内
+  name             = "udemy-aws-14days-tg" # 長さ 32 文字以内
   port             = 80
   protocol         = "HTTP"
   protocol_version = "HTTP1"
@@ -663,8 +700,8 @@ resource "aws_lb_target_group" "udemy_aws_14days_tg" {
     matcher             = "200"
     healthy_threshold   = 2
     unhealthy_threshold = 2
-    timeout             = 5     # 秒
-    interval            = 10    # 秒
+    timeout             = 5  # 秒
+    interval            = 10 # 秒
   }
 
   tags = {
@@ -699,10 +736,10 @@ resource "random_string" "s3_suffix" {
 
 # バケット本体（汎用）
 resource "aws_s3_bucket" "images" {
-  bucket = "udey-aws-14days-images-${random_string.s3_suffix.result}"
+  bucket = "udemy-aws-14days-images-${random_string.s3_suffix.result}"
 
   tags = {
-    Name = "udey-aws-14days-images"
+    Name = "udemy-aws-14days-images"
   }
 }
 
@@ -728,7 +765,7 @@ resource "aws_s3_bucket_public_access_block" "images" {
 # 画像ファイルを S3 にアップロード（imgs/ 配下）
 ###############################################################################
 locals {
-  imgs_dir  = "${path.module}/s3/imgs"
+  imgs_dir = "${path.module}/s3/imgs"
   img_files = [
     "img1_s3.png",
     "img2_s3.png",
@@ -750,23 +787,34 @@ resource "aws_s3_object" "imgs" {
 }
 
 ###############################################################################
-# S3: バケットポリシー（全世界からの GET を許可）
+# S3 バケットポリシー : CloudFront OAC だけ許可
 ###############################################################################
-resource "aws_s3_bucket_policy" "images_public_read" {
-  bucket = aws_s3_bucket.images.id
+data "aws_iam_policy_document" "images_oac" {
+  version = "2012-10-17"
 
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Sid       = "PublicReadGetObject",
-        Effect    = "Allow",
-        Principal = "*",
-        Action    = ["s3:GetObject"],
-        Resource  = ["${aws_s3_bucket.images.arn}/*"]
-      }
-    ]
-  })
+  statement {
+    sid    = "AllowCloudFrontOAC"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.images.arn}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.single_site.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "images_oac" {
+  bucket = aws_s3_bucket.images.id
+  policy = data.aws_iam_policy_document.images_oac.json
 
   depends_on = [
     aws_s3_bucket_ownership_controls.images,
@@ -841,8 +889,8 @@ data "aws_iam_policy_document" "static_site_public" {
 }
 
 resource "aws_s3_bucket_policy" "static_site_public" {
-  bucket     = aws_s3_bucket.static_site.id
-  policy     = data.aws_iam_policy_document.static_site_public.json
+  bucket = aws_s3_bucket.static_site.id
+  policy = data.aws_iam_policy_document.static_site_public.json
   depends_on = [
     aws_s3_bucket_public_access_block.static_site,
     aws_s3_bucket_ownership_controls.static_site
@@ -880,44 +928,211 @@ output "static_site_website_endpoint" {
 }
 
 ###############################################################################
-# Route53 レコード (お名前.comの場合は手動の作業が必要)
+# CloudFront: キャッシュポリシー（画像用）
 ###############################################################################
+resource "aws_cloudfront_cache_policy" "imgs" {
+  name    = "images-cache-policy"
+  comment = "images-cache-policy"
 
-# 使うドメイン（例: example.com）
-variable "domain_name" {
-  description = "Route 53 に委任する apex ドメイン名（例: example.com）"
-  type        = string
-}
+  # TTL（秒）。必要に応じて min/max も調整可
+  default_ttl = 15
+  min_ttl     = 0
+  max_ttl     = 31536000 # 1 年
 
-#############################
-# Route 53: Public Hosted Zone
-#############################
-resource "aws_route53_zone" "primary" {
-  name    = var.domain_name
-  comment = "Public hosted zone for ${var.domain_name}"
-}
+  parameters_in_cache_key_and_forwarded_to_origin {
 
-# 便利な出力（お名前.com に設定する NS）
-output "route53_name_servers" {
-  description = "Route53 の NS（お名前.com に設定）"
-  value       = aws_route53_zone.primary.name_servers
-}
+    # ───── Cookie, Header, Query string はすべて無視 ─────
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
 
-#############################
-# A (ALIAS) : apex を ALB に向ける例
-#############################
-# 既存の ALB リソース: aws_lb.udemy_aws_14days_alb を利用
-resource "aws_route53_record" "alb_apex" {
-  zone_id = aws_route53_zone.primary.zone_id
-  name    = var.domain_name                # apex（example.com）
-  type    = "A"
-
-  alias {
-    name                   = aws_lb.udemy_aws_14days_alb.dns_name
-    zone_id                = aws_lb.udemy_aws_14days_alb.zone_id
-    evaluate_target_health = true
+    # ───── 圧縮 ─────
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
   }
 }
+###############################################################################
+# CloudFront OAC  ― images S3 用
+###############################################################################
+resource "aws_cloudfront_origin_access_control" "images_oac" {
+  name                              = "udemy-aws-14days-images-oac"
+  description                       = "OAC for images S3 origin"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+###############################################################################
+# CloudFront: シングル Web サイト用ディストリビューション
+###############################################################################
+resource "aws_cloudfront_distribution" "single_site" {
+  enabled             = true
+  comment             = "udemy-aws-14days single-page site via ALB"
+  default_root_object = "index.php" # ALB 側には不要だが付けておくと 404 回避になる
+
+  # 独自ドメイン（CNAME/aliases）
+  aliases = [local.cf_domain_name]
+
+  # WAFv2 Web ACL（CLOUDFRONT/Global）を直接関連付け
+  # web_acl_id = aws_wafv2_web_acl.udemy_aws_14days.arn
+
+  # ─────────────── オリジン設定 ───────────────
+  origin {
+    origin_id   = "alb-origin"
+    domain_name = aws_lb.udemy_aws_14days_alb.dns_name
+
+    # ALB へは HTTP(80) だけで到達
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443         # 必須項目のため指定（使われません）
+      origin_protocol_policy = "http-only" # ←★ HTTP のみ
+      origin_ssl_protocols   = ["TLSv1.2"] # 形式上の指定
+    }
+  }
+
+  ###############################################################################
+  # 追加オリジン : images S3 バケット
+  ###############################################################################
+  origin {
+    origin_id                = "s3-images-origin"
+    domain_name              = aws_s3_bucket.images.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.images_oac.id
+
+    # OAC 利用時はココを空文字列にする決まり
+    s3_origin_config {
+      origin_access_identity = ""
+    }
+  }
+
+  # ─────────────── デフォルトキャッシュ動作 ───────────────
+  default_cache_behavior {
+    target_origin_id = "alb-origin"
+
+    # ビューワ ⇄ CloudFront 間のプロトコル
+    viewer_protocol_policy = "redirect-to-https" # HTTP を HTTPS へリダイレクト
+
+    # デフォルトはキャッシュ無効（AWS マネージド CachingDisabled）
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+
+    # 必須項目。単一サイトなら全許可で OK
+    allowed_methods = ["GET", "HEAD", "OPTIONS"]
+    cached_methods  = ["GET", "HEAD"]
+
+    compress = true
+  }
+
+  ###############################################################################
+  # 画像だけ S3 へ転送するキャッシュ動作 (/imgs/*)
+  ###############################################################################
+  ordered_cache_behavior {
+    path_pattern           = "/imgs/*"
+    target_origin_id       = "s3-images-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.imgs.id
+    compress               = true
+  }
+
+  # ─────────────── 価格クラス / ログなど（必要なら調整） ───────────────
+  price_class = "PriceClass_100" # アジア・北米・欧州
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn      = data.aws_acm_certificate.cf.arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name = "udemy-aws-14days-cf-single-site"
+  }
+
+  # 証明書は route53 スタックで発行・検証済みのものを参照する
+}
+
+
+
+/*
+###############################################################################
+# WAFv2 (Global/CLOUDFRONT): IP set と Web ACL を作成し、CloudFront に関連付け
+###############################################################################
+
+# IP set: 13.158.11.168/32 をブロック対象とする
+resource "aws_wafv2_ip_set" "udemy_aws_14days" {
+  provider = aws.us_east_1
+
+  name               = "udemy-aws-14days-ip-set"
+  description        = "Block-list for specific IPv4 addresses"
+  scope              = "CLOUDFRONT"   # Global
+  ip_address_version = "IPV4"
+
+  addresses = [
+    "13.158.11.168/32"
+  ]
+
+  tags = {
+    Name = "udemy-aws-14days-ip-set"
+  }
+}
+
+# Web ACL: 既定 Allow、IP set ルールで Block
+resource "aws_wafv2_web_acl" "udemy_aws_14days" {
+  provider = aws.us_east_1
+
+  name        = "udemy-aws-14days-web-acl"
+  description = "Web ACL for CloudFront distribution"
+  scope       = "CLOUDFRONT" # Global
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "udemy-aws-14days-my-rule-ip-set"
+    priority = 1
+
+    action {
+      block {}
+    }
+
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.udemy_aws_14days.arn
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "udemy-aws-14days-my-rule-ip-set"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "udemy-aws-14days-web-acl"
+    sampled_requests_enabled   = true
+  }
+}
+
+## CloudFront ディストリビューションへの関連付けは上記 `web_acl_id` で実施
+*/
+
+###############################################################################
+# Route53 は Day9_dns/ スタックへ移動しました（destroy 対象から分離）
+###############################################################################
 
 ###############################################################################
 # 出力
@@ -967,7 +1182,18 @@ output "alb_dns_name" {
   value       = aws_lb.udemy_aws_14days_alb.dns_name
 }
 
+output "alb_zone_id" {
+  description = "Hosted zone ID of the ALB"
+  value       = aws_lb.udemy_aws_14days_alb.zone_id
+}
+
 output "s3_bucket_name" {
   description = "S3 bucket name for images"
   value       = aws_s3_bucket.images.bucket
+}
+
+# CloudFront 情報（Route53 スタックから参照する用）
+output "cloudfront_domain_name" {
+  description = "CloudFront distribution domain name"
+  value       = aws_cloudfront_distribution.single_site.domain_name
 }
